@@ -1,55 +1,55 @@
-from pathlib import Path
-from time import sleep
-
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+import dbus
+import dbus.mainloop.glib
+from gi.repository import GLib
 
 from wallpaper import get_current_wallpaper
 from colours_class import Colours
 from widget import update_widget
 
 
-CONFIG_DIR = Path.home() / ".config"
-CONFIG_FILE = "plasma-org.kde.plasma.desktop-appletsrc"
+WAYWALLEN_BUS = "org.waywallen.waywallen.Daemon"
+WAYWALLEN_PATH = "/org/waywallen/waywallen/Daemon"
+WAYWALLEN_INTERFACE = "org.waywallen.waywallen.Daemon1"
 
 
-class WallpaperHandler(FileSystemEventHandler):
-    def __init__(self):
-        self.last_wallpaper = None
+def update():
+    path = get_current_wallpaper()
 
-    def update(self):
-        path = get_current_wallpaper()
+    wallpaper = Colours(path)
+    wallpaper.extract_colours()
 
-        if path == self.last_wallpaper:
-            return
+    cpu_colour, gpu_colour = wallpaper.get_accents()
 
-        wallpaper = Colours(path)
-        wallpaper.extract_colours()
+    print(f"Wallpaper: {path}")
+    print(f"CPU accent: {cpu_colour}")
+    print(f"GPU accent: {gpu_colour}")
 
-        cpu_accent, gpu_accent = wallpaper.get_accents()
-
-        update_widget(cpu_accent, gpu_accent)
-
-        self.last_wallpaper = path
-
-    def on_modified(self, event):
-        if Path(event.src_path).name == CONFIG_FILE:
-            sleep(1)
-            self.update()
+    update_widget(cpu_colour, gpu_colour)
 
 
-handler = WallpaperHandler()
+def wallpaper_changed(interface, changed, invalidated):
+    if interface != WAYWALLEN_INTERFACE:
+        return
 
-handler.update()
+    if "CurrentWallpaperId" not in changed:
+        return
 
-observer = Observer()
-observer.schedule(handler, str(CONFIG_DIR), recursive=False)
-observer.start()
+    print("Wallpaper changed.")
+    update()
 
-try:
-    while True:
-        sleep(1)
-except KeyboardInterrupt:
-    observer.stop()
 
-observer.join()
+dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
+bus = dbus.SessionBus()
+
+bus.add_signal_receiver(
+    wallpaper_changed,
+    signal_name="PropertiesChanged",
+    dbus_interface="org.freedesktop.DBus.Properties",
+    path=WAYWALLEN_PATH
+)
+
+update()
+
+loop = GLib.MainLoop()
+loop.run()
